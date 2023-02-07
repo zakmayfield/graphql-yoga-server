@@ -3,9 +3,7 @@ import { GraphQLContext } from './context';
 import { makeExecutableSchema } from '@graphql-tools/schema';
 import { GraphQLError } from 'graphql';
 import type { Link, Comment } from '@prisma/client';
-import {
-  PrismaClientKnownRequestError,
-} from '@prisma/client/runtime';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime';
 
 const parseIntSafe = (value: string): number | null => {
   if (/^(\d+)$/.test(value)) {
@@ -14,9 +12,37 @@ const parseIntSafe = (value: string): number | null => {
   return null;
 };
 
+const applyTakeConstraints = (params: {
+  min: number;
+  max: number;
+  value: number;
+}) => {
+  if (params.value < params.min || params.value > params.max) {
+    throw new GraphQLError(
+      `'take' argument value '${params.value}' is outside the valud range of ${params.min} to ${params.max}`
+    );
+  }
+
+  return params.value;
+};
+
+const applySkipConstraints = (params: {
+  min: number;
+  max: number;
+  value: number;
+}) => {
+  if (params.value < params.min || params.value > params.max) {
+    throw new GraphQLError(
+      `'skip' argument value '${params.value}' is outside the valud range of ${params.min} to ${params.max}`
+    );
+  }
+
+  return params.value;
+};
+
 const typeDefs = /* GraphQL */ `
   type Query {
-    linkFeed: [Link]!
+    linkFeed(filterNeedle: String, take: Int, skip: Int): [Link]!
     link(linkId: ID!): Link
     comment(commentId: String!): Comment
     linkComments(linkId: String!): Link
@@ -49,8 +75,45 @@ const resolvers = {
   // ::: query :::
   Query: {
     // ::: Link :::
-    linkFeed: async (parent: unknown, args: {}, context: GraphQLContext) => {
-      const linkFeed = await context.prisma.link.findMany();
+    linkFeed: async (
+      parent: unknown,
+      args: { filterNeedle?: string; skip?: number; take?: number },
+      context: GraphQLContext
+    ) => {
+      /* Regarding filterNeedle
+        filterNeedle is a pretty powerful tool to utilize, this is allowing us to search our Link model based on a condition of similar characters. We can specify which rows we want to filter against, in this case below we are filtering against both properties, description and url. If we change this to just check description then any matchings against url wont register
+      */
+
+      // note * consider making enums for available pagination min and max amounts ect
+
+      const where = args.filterNeedle
+        ? {
+            OR: [
+              { description: { contains: args.filterNeedle } },
+              { url: { contains: args.filterNeedle } },
+            ],
+          }
+        : {};
+
+      const take = applyTakeConstraints({
+        min: 1,
+        max: 50,
+        value: args.take ?? 30,
+      });
+
+      const skip = applySkipConstraints({
+        min: 0,
+        max: 50,
+        value: args.skip ?? 0,
+      });
+
+      const linkFeed = await context.prisma.link.findMany({
+        where,
+        // take: number of items to take from the list
+        take,
+        // start at after x amount of indexes i.e. skip first 10
+        skip,
+      });
 
       return linkFeed;
     },
@@ -117,9 +180,7 @@ const resolvers = {
     ) => {
       const { description, url } = args;
       if (!description || !url)
-        return Promise.reject(
-          new GraphQLError(`🚫 All fields are required.`)
-        )
+        return Promise.reject(new GraphQLError(`🚫 All fields are required.`));
 
       const newLink: Link = await context.prisma.link.create({
         data: {
@@ -202,9 +263,7 @@ const resolvers = {
         );
 
       if (!body)
-        return Promise.reject(
-          new GraphQLError(`🚫 Body is a required field`)
-        );
+        return Promise.reject(new GraphQLError(`🚫 Body is a required field`));
 
       const newComment: Comment = await context.prisma.comment
         .create({
