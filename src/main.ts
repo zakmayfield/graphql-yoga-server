@@ -3,6 +3,9 @@ import { execute, parse } from 'graphql';
 import { createYoga } from 'graphql-yoga';
 import { createServer } from 'http';
 import { createContext } from './context';
+import * as dotenv from 'dotenv';
+
+dotenv.config()
 
 async function main() {
     const yoga = createYoga({ schema, context: createContext })

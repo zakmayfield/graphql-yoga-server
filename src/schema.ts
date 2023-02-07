@@ -1,9 +1,18 @@
-import { PostLinkArgs, PostCommentArgs, UpdateCommentArgs } from './types';
+import { APP_SECRET } from './auth';
+import {
+  PostLinkArgs,
+  PostCommentArgs,
+  UpdateCommentArgs,
+  SignupArgs,
+  LoginArgs,
+} from './types';
 import { GraphQLContext } from './context';
 import { makeExecutableSchema } from '@graphql-tools/schema';
 import { GraphQLError } from 'graphql';
 import type { Link, Comment } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime';
+import { compare, hash } from 'bcryptjs';
+import { sign } from 'jsonwebtoken';
 
 const parseIntSafe = (value: string): number | null => {
   if (/^(\d+)$/.test(value)) {
@@ -55,6 +64,22 @@ const typeDefs = /* GraphQL */ `
     updateCommentOnLink(commentId: String!, body: String!): Comment
 
     deleteLink(id: String!): Link!
+
+    signup(name: String!, email: String!, password: String!): AuthPayload
+    login(email: String!, password: String!): AuthPayload
+  }
+
+  type AuthPayload {
+    token: String
+    user: User
+  }
+
+  type User {
+    id: ID!
+    name: String!
+    email: String!
+    password: String!
+    links: [Link!]!
   }
 
   type Link {
@@ -62,6 +87,7 @@ const typeDefs = /* GraphQL */ `
     description: String!
     url: String!
     comments: [Comment!]!
+    postedBy: User
   }
 
   type Comment {
@@ -172,6 +198,73 @@ const resolvers = {
 
   // ::: mutations :::
   Mutation: {
+    // ::: User :::
+    signup: async (
+      parent: unknown,
+      args: SignupArgs,
+      context: GraphQLContext
+    ) => {
+      // validate args // throw if incomplete data
+      const { name, email, password } = args;
+      if (!name || !email || !password) {
+        return Promise.reject(new GraphQLError(`🚫 All fields are required.`));
+      }
+
+      // check if email exists
+      const emailExists = await context.prisma.user.findUnique({
+        where: { email },
+      });
+      if (emailExists) {
+        return Promise.reject(
+          new GraphQLError(`🚫 Email is already taken, try again.`)
+        );
+      }
+
+      const hashedPassword = await hash(password, 10);
+
+      const user = await context.prisma.user.create({
+        data: { ...args, password: hashedPassword },
+      });
+
+      const token = sign({ userId: user.id }, APP_SECRET);
+
+      console.log({ token, user });
+
+      return { token, user };
+    },
+    login: async (
+      parent: unknown,
+      args: LoginArgs,
+      context: GraphQLContext
+    ) => {
+      // validate args
+      const { email, password } = args;
+      if (!email || !password) {
+        return Promise.reject(new GraphQLError(`🚫 All fields are required.`));
+      }
+
+      // query requested user
+      const user = await context.prisma.user.findUnique({ where: { email } });
+      if (!user) {
+        return Promise.reject(
+          new GraphQLError(`🚫 That user doesn't seem to exist.`)
+        )
+      }
+
+      // validate the password
+      const passwordIsValid = await compare(args.password, user.password)
+      if (!passwordIsValid) {
+        return Promise.reject(
+          new GraphQLError(`🚫 Incorrect credentials.`)
+        )
+      }
+
+      // generate a token
+      const token = sign({ userId: user.id }, APP_SECRET)
+
+      return { token, user };
+    },
+
     // ::: Link :::
     postLink: async (
       parent: unknown,
