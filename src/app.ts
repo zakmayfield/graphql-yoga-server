@@ -22,7 +22,7 @@ export function buildApp(logging = true) {
     schema,
 
     context: createContext,
-    
+
     logging: {
       debug: (...args) => args.forEach((arg) => app.log.debug(arg)),
       info: (...args) => args.forEach((arg) => app.log.info(arg)),

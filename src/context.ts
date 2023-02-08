@@ -1,5 +1,6 @@
 import { PrismaClient, User } from '@prisma/client';
-import { YogaInitialContext } from 'graphql-yoga';
+import { FastifyRequest } from 'fastify';
+import { GraphQLParams } from 'graphql-yoga';
 import { authenticateUser } from './auth';
 
 const prisma = new PrismaClient();
@@ -9,12 +10,17 @@ export type GraphQLContext = {
   currentUser: User | null;
 };
 
+type ContextProps = {
+  request: FastifyRequest;
+  params: GraphQLParams;
+};
+
 export async function createContext(
-  initialContext: YogaInitialContext
+  initialContext: ContextProps
 ): Promise<GraphQLContext> {
+//   console.log('initialContext :::', initialContext.request);
   return {
     prisma,
-    currentUser: null,
-    // currentUser: await authenticateUser(prisma, initialContext.request),
+    currentUser: await authenticateUser(prisma, initialContext.request),
   };
 }
